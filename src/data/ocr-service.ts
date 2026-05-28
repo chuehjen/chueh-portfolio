@@ -82,7 +82,7 @@ export async function recognizeHoldingsFromImage(base64Image: string): Promise<R
     return parsed;
   } catch (error) {
     console.error('Recognition error:', error);
-    return { holdings: [], source: 'unknown', confidence: 'low' };
+    throw new Error(String(error));
   }
 }
 

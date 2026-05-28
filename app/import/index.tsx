@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import { recognizeHoldingsFromImage, convertToHoldings, RecognizedHolding } from '../../src/data/ocr-service';
 import { parseCSV } from '../../src/data/csv-parser';
@@ -62,8 +62,9 @@ export default function ImportScreen() {
       if (result.holdings.length === 0) {
         Alert.alert('未识别到持仓', '请确保截图包含完整的持仓列表');
       }
-    } catch (e) {
-      Alert.alert('识别失败', String(e));
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      Alert.alert('识别失败', msg.substring(0, 300));
     } finally {
       setRecognizing(false);
     }

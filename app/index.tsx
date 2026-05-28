@@ -14,14 +14,21 @@ import { EmptyState } from '../src/components/ui/EmptyState';
 import { formatCurrency, formatPercent } from '../src/utils/formatters';
 import { getRandomTip } from '../src/utils/tips';
 import { analyzePortfolio } from '../src/data/ai-service';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { holdings, prices, summary, details, isLoading, refresh } = usePortfolio();
+  const { holdings, prices, summary, details, isLoading, refresh, loadData } = usePortfolio();
   const { score } = useHealthScore(holdings, prices);
   const [refreshing, setRefreshing] = React.useState(false);
   const [tip] = React.useState(getRandomTip);
+
+  // 每次页面获得焦点时重新加载数据（导入后自动刷新）
+  useFocusEffect(
+    React.useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
   const [aiInsight, setAiInsight] = React.useState<{
     summary: string;
     suggestions: string[];

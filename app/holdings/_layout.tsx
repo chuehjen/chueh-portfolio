@@ -2,9 +2,9 @@ import { Stack } from 'expo-router';
 
 export default function HoldingsLayout() {
   return (
-    <Stack>
-      <Stack.Screen name="index" options={{ title: '持仓列表' }} />
-      <Stack.Screen name="[symbol]" options={{ title: '持仓详情' }} />
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="[symbol]" options={{ headerShown: true, title: '持仓详情' }} />
     </Stack>
   );
 }
