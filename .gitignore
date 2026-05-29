@@ -42,3 +42,4 @@ yarn-error.*
 
 # legacy redundant nested copy
 /chueh-portfolio/
+.env

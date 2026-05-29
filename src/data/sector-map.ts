@@ -63,3 +63,34 @@ const SECTOR_MAP: Record<string, string> = {
 export function getSector(symbol: string): string {
   return SECTOR_MAP[symbol.toUpperCase()] || 'Unknown';
 }
+
+const SECTOR_ZH: Record<string, string> = {
+  Technology: '科技',
+  Healthcare: '医疗',
+  Financials: '金融',
+  'Communication Services': '通讯',
+  'Consumer Discretionary': '可选消费',
+  'Consumer Staples': '必需消费',
+  Energy: '能源',
+  'Real Estate': '地产',
+  Utilities: '公用事业',
+  Industrials: '工业',
+  Materials: '材料',
+  Unknown: '其他',
+};
+
+export function getSectorZH(symbol: string): string {
+  const sector = getSector(symbol);
+  return SECTOR_ZH[sector] || '其他';
+}
+
+export const SECTOR_DESCRIPTIONS: { name: string; desc: string }[] = [
+  { name: '科技', desc: 'AI/半导体/软件等高成长行业，如 AAPL、NVDA' },
+  { name: '医疗', desc: '药企/医疗器械，需求稳定，如 LLY、JNJ' },
+  { name: '金融', desc: '银行/支付/保险，受利率影响，如 JPM、V' },
+  { name: '通讯', desc: '互联网/媒体/电信，如 GOOGL、META' },
+  { name: '可选消费', desc: '汽车/电商/旅游，景气周期敏感，如 AMZN、TSLA' },
+  { name: '必需消费', desc: '食品/日用品，防御性强，如 PG、KO' },
+  { name: '能源', desc: '油气资源，受油价驱动' },
+  { name: '公用事业', desc: '水电燃气，低波动高股息' },
+];

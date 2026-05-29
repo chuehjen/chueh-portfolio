@@ -14,12 +14,15 @@ import {
 } from 'react-native';
 import { usePortfolio } from '../../src/hooks/use-portfolio';
 import { useHealthScore } from '../../src/hooks/use-health-score';
-import { formatCurrency } from '../../src/utils/formatters';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from 'expo-router';
+import { useHoldingInsights } from '../../src/hooks/use-holding-insights';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { deleteHolding, upsertHolding } from '../../src/data/storage';
 import { Holding } from '../../src/domain/types';
 import { getSector } from '../../src/data/sector-map';
+import { HoldingRow } from '../../src/components/portfolio/HoldingRow';
+import { STRATEGY_DESCRIPTIONS } from '../../src/data/insight-service';
+import { SECTOR_DESCRIPTIONS } from '../../src/data/sector-map';
+import { color, spacing, radius, font, shadow, semantic } from '../../src/theme/tokens';
 
 type SortKey = 'value' | 'pnl' | 'name';
 
@@ -35,13 +38,15 @@ const EMPTY_FORM: FormData = { symbol: '', name: '', shares: '', costBasisPerSha
 
 export default function HoldingsScreen() {
   const router = useRouter();
-  const { holdings, prices, summary, details, isLoading, refresh, loadData } = usePortfolio();
+  const { holdings, prices, details, refresh, loadData } = usePortfolio();
   const { score } = useHealthScore(holdings, prices);
+  const { insights } = useHoldingInsights(holdings, prices);
   const [refreshing, setRefreshing] = React.useState(false);
   const [sortBy, setSortBy] = React.useState<SortKey>('value');
   const [showModal, setShowModal] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<FormData>(EMPTY_FORM);
+  const [showLegend, setShowLegend] = React.useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -51,8 +56,11 @@ export default function HoldingsScreen() {
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    await refresh();
-    setRefreshing(false);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
   }, [refresh]);
 
   const sortedDetails = React.useMemo(() => {
@@ -63,8 +71,6 @@ export default function HoldingsScreen() {
       default: return items.sort((a, b) => b.value - a.value);
     }
   }, [details, sortBy]);
-
-  const healthColor = (s: number) => s >= 70 ? '#00C851' : s >= 40 ? '#FFB300' : '#FF5252';
 
   const openAdd = () => {
     setEditingId(null);
@@ -105,7 +111,7 @@ export default function HoldingsScreen() {
   };
 
   const handleDelete = (id: string, symbol: string) => {
-    Alert.alert('确认删除', `删除 ${symbol} ?`, [
+    Alert.alert('确认删除', `删除 ${symbol}?`, [
       { text: '取消', style: 'cancel' },
       {
         text: '删除',
@@ -117,73 +123,6 @@ export default function HoldingsScreen() {
       },
     ]);
   };
-
-  const renderHeader = () => (
-    <View>
-      {/* Health Score Card */}
-      <View style={styles.healthCard}>
-        <View style={styles.healthTop}>
-          <View style={styles.healthMain}>
-            <Text style={[styles.healthScoreNum, { color: healthColor(score.overall) }]}>
-              {score.overall}
-            </Text>
-            <Text style={styles.healthLabel}>健康评分</Text>
-          </View>
-          <View style={styles.healthGrid}>
-            {[
-              { label: '集中度', value: score.components.concentration },
-              { label: '行业', value: score.components.diversification },
-              { label: '波动率', value: score.components.volatility },
-              { label: '回撤', value: score.components.drawdown },
-            ].map((item) => (
-              <View key={item.label} style={styles.healthItem}>
-                <Text style={[styles.healthItemValue, { color: healthColor(item.value) }]}>
-                  {item.value}
-                </Text>
-                <Text style={styles.healthItemLabel}>{item.label}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      </View>
-
-      {/* Sort Bar + Add Button */}
-      <View style={styles.sortBar}>
-        <Text style={styles.countLabel}>{holdings.length} 只持仓</Text>
-        <View style={styles.sortButtons}>
-          {(['value', 'pnl', 'name'] as SortKey[]).map((key) => (
-            <TouchableOpacity
-              key={key}
-              style={[styles.sortBtn, sortBy === key && styles.sortBtnActive]}
-              onPress={() => setSortBy(key)}
-            >
-              <Text style={[styles.sortBtnText, sortBy === key && styles.sortBtnTextActive]}>
-                {key === 'value' ? '市值' : key === 'pnl' ? '盈亏' : '名称'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity style={styles.addBtn} onPress={openAdd}>
-            <Text style={styles.addBtnText}>+ 添加</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  );
-
-  if (holdings.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>暂无持仓数据</Text>
-        <TouchableOpacity style={styles.importBtn} onPress={() => router.push('/import')}>
-          <Text style={styles.importBtnText}>导入持仓</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.importBtn, { backgroundColor: '#FFF', borderWidth: 1.5, borderColor: '#00C851', marginTop: 10 }]} onPress={openAdd}>
-          <Text style={[styles.importBtnText, { color: '#00C851' }]}>手动添加</Text>
-        </TouchableOpacity>
-        {renderModal()}
-      </View>
-    );
-  }
 
   const showActions = (h: Holding) => {
     Alert.alert(h.symbol, '选择操作', [
@@ -207,6 +146,7 @@ export default function HoldingsScreen() {
                 value={form.symbol}
                 onChangeText={(v) => setForm({ ...form, symbol: v })}
                 placeholder="如 AAPL 或 00700.HK"
+                placeholderTextColor={color.text.tertiary}
                 autoCapitalize="characters"
               />
             </View>
@@ -217,6 +157,7 @@ export default function HoldingsScreen() {
                 value={form.name}
                 onChangeText={(v) => setForm({ ...form, name: v })}
                 placeholder="可选，如 Apple Inc"
+                placeholderTextColor={color.text.tertiary}
               />
             </View>
             <View style={styles.formRow}>
@@ -226,6 +167,7 @@ export default function HoldingsScreen() {
                 value={form.shares}
                 onChangeText={(v) => setForm({ ...form, shares: v })}
                 placeholder="持有股数"
+                placeholderTextColor={color.text.tertiary}
                 keyboardType="numeric"
               />
             </View>
@@ -236,6 +178,7 @@ export default function HoldingsScreen() {
                 value={form.costBasisPerShare}
                 onChangeText={(v) => setForm({ ...form, costBasisPerShare: v })}
                 placeholder="每股成本"
+                placeholderTextColor={color.text.tertiary}
                 keyboardType="decimal-pad"
               />
             </View>
@@ -268,38 +211,139 @@ export default function HoldingsScreen() {
     );
   }
 
+  const renderHeader = () => (
+    <View>
+      {/* Health Score Card */}
+      <View style={styles.healthCard}>
+        <View style={styles.healthTop}>
+          <View style={styles.healthMain}>
+            <Text style={[styles.healthScoreNum, { color: semantic.scoreColor(score.overall) }]}>
+              {score.overall}
+            </Text>
+            <Text style={styles.healthLabel}>健康评分</Text>
+          </View>
+          <View style={styles.healthGrid}>
+            {[
+              { label: '集中度', value: score.components.concentration },
+              { label: '行业', value: score.components.diversification },
+              { label: '波动率', value: score.components.volatility },
+              { label: '回撤', value: score.components.drawdown },
+            ].map((item) => (
+              <View key={item.label} style={styles.healthItem}>
+                <Text style={[styles.healthItemValue, { color: semantic.scoreColor(item.value) }]}>
+                  {item.value}
+                </Text>
+                <Text style={styles.healthItemLabel}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+
+      {/* Legend Toggle (贴在健康评分下方) */}
+      <TouchableOpacity
+        style={styles.legendToggle}
+        activeOpacity={0.7}
+        onPress={() => setShowLegend((v) => !v)}
+      >
+        <Text style={styles.legendToggleText}>
+          {showLegend ? '收起说明' : '名词说明'}
+        </Text>
+        <Text style={styles.legendChevron}>{showLegend ? '∧' : '∨'}</Text>
+      </TouchableOpacity>
+
+      {showLegend && (
+        <View style={styles.legendCard}>
+          <Text style={styles.legendSectionTitle}>健康评分维度</Text>
+          {[
+            { name: '集中度', desc: '单只持仓占比是否过高，越分散越抗风险' },
+            { name: '行业', desc: '行业分布是否均衡，避免押注单一赛道' },
+            { name: '波动率', desc: '组合整体涨跌剧烈程度，越低越稳' },
+            { name: '回撤', desc: '从历史高点跌下来的最大幅度，衡量极端下行风险' },
+          ].map((s) => (
+            <View key={s.name} style={styles.legendItem}>
+              <Text style={styles.legendTermText}>{s.name}</Text>
+              <Text style={styles.legendDesc}>{s.desc}</Text>
+            </View>
+          ))}
+          <View style={styles.legendDivider} />
+          <Text style={styles.legendSectionTitle}>AI 策略标签</Text>
+          {STRATEGY_DESCRIPTIONS.map((s) => (
+            <View key={s.name} style={styles.legendItem}>
+              <Text style={[styles.legendTermText, { color: color.brand.primary }]}>{s.name}</Text>
+              <Text style={styles.legendDesc}>{s.desc}</Text>
+            </View>
+          ))}
+          <View style={styles.legendDivider} />
+          <Text style={styles.legendSectionTitle}>行业分类</Text>
+          {SECTOR_DESCRIPTIONS.map((s) => (
+            <View key={s.name} style={styles.legendItem}>
+              <Text style={styles.legendTermText}>{s.name}</Text>
+              <Text style={styles.legendDesc}>{s.desc}</Text>
+            </View>
+          ))}
+          <Text style={styles.legendFooter}>策略标签后的百分比 = AI 判定的置信度</Text>
+        </View>
+      )}
+
+      {/* Sort Bar */}
+      <View style={styles.sortBar}>
+        <Text style={styles.countLabel}>{holdings.length} 只持仓</Text>
+        <View style={styles.sortButtons}>
+          {(['name', 'value', 'pnl'] as SortKey[]).map((key) => (
+            <TouchableOpacity
+              key={key}
+              style={[styles.sortBtn, sortBy === key && styles.sortBtnActive]}
+              onPress={() => setSortBy(key)}
+            >
+              <Text style={[styles.sortBtnText, sortBy === key && styles.sortBtnTextActive]}>
+                {key === 'name' ? '名称' : key === 'value' ? '市值' : '盈亏'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={styles.addBtn} onPress={openAdd}>
+            <Text style={styles.addBtnText}>+ 添加</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+
+  if (holdings.length === 0) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>暂无持仓数据</Text>
+        <TouchableOpacity style={styles.importBtn} onPress={() => router.push('/import')}>
+          <Text style={styles.importBtnText}>导入持仓</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.outlineBtn} onPress={openAdd}>
+          <Text style={styles.outlineBtnText}>手动添加</Text>
+        </TouchableOpacity>
+        {renderModal()}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <FlatList
         data={sortedDetails}
         keyExtractor={(item) => item.holding.id}
         ListHeaderComponent={renderHeader}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.row}
-            activeOpacity={0.6}
-            onPress={() => showActions(item.holding)}
-          >
-            <View style={styles.rowLeft}>
-              <Text style={styles.rowSymbol}>{item.holding.symbol}</Text>
-              <Text style={styles.rowName} numberOfLines={1}>{item.holding.name}</Text>
-            </View>
-            <View style={styles.rowCenter}>
-              <Text style={styles.rowShares}>{item.holding.shares}股</Text>
-              <Text style={styles.rowWeight}>{item.weight.toFixed(1)}%</Text>
-            </View>
-            <View style={styles.rowRight}>
-              <Text style={styles.rowValue}>{formatCurrency(item.value, item.holding.currency)}</Text>
-              <View style={[styles.rowPill, item.pnl >= 0 ? styles.pillUp : styles.pillDown]}>
-                <Text style={[styles.rowPillText, item.pnl >= 0 ? styles.textUp : styles.textDown]}>
-                  {item.pnl >= 0 ? '+' : ''}{item.pnlPercent.toFixed(1)}%
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          const ins = insights.get(item.holding.symbol);
+          return (
+            <HoldingRow
+              item={item}
+              aiTag={ins ? { label: ins.tag, confidence: ins.confidence } : null}
+              onPress={(it) => showActions(it.holding)}
+            />
+          );
+        }}
         contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C851" />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.brand.primary} />
+        }
       />
       {renderModal()}
     </View>
@@ -307,104 +351,176 @@ export default function HoldingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFBFE' },
-  listContent: { paddingBottom: 32 },
-  emptyContainer: { flex: 1, backgroundColor: '#FAFBFE', justifyContent: 'center', alignItems: 'center' },
-  emptyText: { fontSize: 15, color: '#8E8EA0' },
-  importBtn: { marginTop: 16, backgroundColor: '#00C851', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 },
-  importBtnText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
+  container: { flex: 1, backgroundColor: color.bg.app },
+  listContent: { paddingBottom: spacing.xxxl },
+
+  emptyContainer: { flex: 1, backgroundColor: color.bg.app, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { ...font.body, color: color.text.secondary },
+  importBtn: {
+    marginTop: spacing.lg,
+    backgroundColor: color.brand.primary,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+  },
+  importBtnText: { color: color.text.onPrimary, ...font.body, fontWeight: '700' },
+  outlineBtn: {
+    marginTop: spacing.sm + 2,
+    backgroundColor: color.bg.card,
+    borderWidth: 1.5,
+    borderColor: color.brand.primary,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+  },
+  outlineBtnText: { color: color.brand.primary, ...font.body, fontWeight: '700' },
+
   healthCard: {
-    margin: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 20,
-    shadowColor: '#00C851',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 3,
+    margin: spacing.lg,
+    backgroundColor: color.bg.card,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    ...shadow.elevated,
   },
   healthTop: { flexDirection: 'row', alignItems: 'center' },
-  healthMain: { alignItems: 'center', marginRight: 24 },
-  healthScoreNum: { fontSize: 42, fontWeight: '800' },
-  healthLabel: { fontSize: 11, color: '#8E8EA0', marginTop: 2 },
-  healthGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  healthItem: { width: '46%', alignItems: 'center', paddingVertical: 8, backgroundColor: '#FAFBFE', borderRadius: 10 },
-  healthItemValue: { fontSize: 18, fontWeight: '700' },
-  healthItemLabel: { fontSize: 11, color: '#8E8EA0', marginTop: 2 },
+  healthMain: { alignItems: 'center', marginRight: spacing.xxl },
+  healthScoreNum: { ...font.display, ...semantic.numberStyle },
+  healthLabel: { ...font.tiny, color: color.text.secondary, marginTop: 2 },
+  healthGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  healthItem: {
+    width: '46%',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    backgroundColor: color.bg.app,
+    borderRadius: radius.md,
+  },
+  healthItemValue: { fontSize: 18, fontWeight: '700', ...semantic.numberStyle },
+  healthItemLabel: { ...font.tiny, color: color.text.secondary, marginTop: 2 },
+
   sortBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
   },
-  countLabel: { fontSize: 13, fontWeight: '600', color: '#8E8EA0' },
+  countLabel: { ...font.caption, color: color.text.secondary },
   sortButtons: { flexDirection: 'row', gap: 6 },
-  sortBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#F0F0F5' },
-  sortBtnActive: { backgroundColor: '#00C851' },
-  sortBtnText: { fontSize: 12, fontWeight: '600', color: '#8E8EA0' },
-  sortBtnTextActive: { color: '#FFFFFF' },
-  addBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#00C851' },
-  addBtnText: { fontSize: 12, fontWeight: '700', color: '#FFFFFF' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 1,
+  sortBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.sm + 2,
+    backgroundColor: color.bg.subtle,
   },
-  rowLeft: { flex: 1 },
-  rowSymbol: { fontSize: 14, fontWeight: '700', color: '#1A1A2E' },
-  rowName: { fontSize: 11, color: '#8E8EA0', marginTop: 2, maxWidth: 100 },
-  rowCenter: { alignItems: 'center', marginHorizontal: 12 },
-  rowShares: { fontSize: 12, color: '#8E8EA0' },
-  rowWeight: { fontSize: 11, color: '#B0B0C0', marginTop: 1 },
-  rowRight: { alignItems: 'flex-end' },
-  rowValue: { fontSize: 14, fontWeight: '600', color: '#1A1A2E' },
-  rowPill: { marginTop: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  pillUp: { backgroundColor: '#00C85112' },
-  pillDown: { backgroundColor: '#FF525212' },
-  rowPillText: { fontSize: 12, fontWeight: '700' },
-  textUp: { color: '#00C851' },
-  textDown: { color: '#FF5252' },
+  sortBtnActive: { backgroundColor: color.brand.primary },
+  sortBtnText: { ...font.tag, fontWeight: '600', color: color.text.secondary },
+  sortBtnTextActive: { color: color.text.onPrimary },
+  addBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.sm + 2,
+    backgroundColor: color.brand.primary,
+  },
+  addBtnText: { ...font.tag, color: color.text.onPrimary },
+
+  // Legend (弱化版)
+  legendToggle: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: spacing.lg,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm,
+    paddingVertical: 6,
+  },
+  legendToggleText: { ...font.tiny, color: color.text.tertiary, fontWeight: '500' },
+  legendChevron: { ...font.tiny, color: color.text.tertiary, marginLeft: 4 },
+  legendCard: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    backgroundColor: color.bg.subtle,
+    borderRadius: radius.md,
+  },
+  legendSectionTitle: {
+    ...font.tiny,
+    color: color.text.secondary,
+    fontWeight: '700',
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+  },
+  legendTermText: {
+    ...font.tiny,
+    color: color.text.primary,
+    fontWeight: '700',
+    width: 64,
+    marginRight: spacing.sm,
+  },
+  legendDesc: { ...font.tiny, color: color.text.secondary, flex: 1, lineHeight: 18 },
+  legendDivider: {
+    height: 1,
+    backgroundColor: color.border.default,
+    marginVertical: spacing.sm,
+  },
+  legendFooter: {
+    ...font.tiny,
+    color: color.text.tertiary,
+    marginTop: spacing.sm,
+    fontStyle: 'italic',
+  },
+
   // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalCard: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    backgroundColor: color.bg.card,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing.xxl,
     paddingBottom: 40,
   },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: '#1A1A2E', marginBottom: 20 },
-  formRow: { marginBottom: 16 },
-  formLabel: { fontSize: 13, fontWeight: '600', color: '#8E8EA0', marginBottom: 6 },
+  modalTitle: { ...font.h1, color: color.text.primary, marginBottom: spacing.xl },
+  formRow: { marginBottom: spacing.lg },
+  formLabel: { ...font.caption, color: color.text.secondary, marginBottom: 6 },
   formInput: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 15,
-    color: '#1A1A2E',
+    backgroundColor: color.bg.surface,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    ...font.body,
+    color: color.text.primary,
     borderWidth: 1,
-    borderColor: '#F0F0F5',
+    borderColor: color.border.default,
   },
-  currencyRow: { flexDirection: 'row', gap: 8 },
-  currencyBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: '#F0F0F5' },
-  currencyBtnActive: { backgroundColor: '#00C851' },
-  currencyBtnText: { fontSize: 13, fontWeight: '600', color: '#8E8EA0' },
-  currencyBtnTextActive: { color: '#FFFFFF' },
-  modalActions: { flexDirection: 'row', gap: 12, marginTop: 20 },
-  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F0F0F5', alignItems: 'center' },
-  cancelBtnText: { fontSize: 15, fontWeight: '600', color: '#8E8EA0' },
-  saveBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#00C851', alignItems: 'center' },
-  saveBtnText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
+  currencyRow: { flexDirection: 'row', gap: spacing.sm },
+  currencyBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm + 2,
+    backgroundColor: color.bg.subtle,
+  },
+  currencyBtnActive: { backgroundColor: color.brand.primary },
+  currencyBtnText: { ...font.caption, color: color.text.secondary },
+  currencyBtnTextActive: { color: color.text.onPrimary },
+  modalActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.xl },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.lg - 2,
+    backgroundColor: color.bg.subtle,
+    alignItems: 'center',
+  },
+  cancelBtnText: { ...font.body, color: color.text.secondary },
+  saveBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.lg - 2,
+    backgroundColor: color.brand.primary,
+    alignItems: 'center',
+  },
+  saveBtnText: { ...font.body, fontWeight: '700', color: color.text.onPrimary },
 });

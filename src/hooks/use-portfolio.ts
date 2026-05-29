@@ -47,25 +47,38 @@ export function usePortfolio() {
 
   const refresh = useCallback(async () => {
     if (holdings.length === 0) return;
-    const symbols = [...new Set(holdings.map((h) => normalizeSymbol(h.symbol)))];
-    const priceData = await yahooProvider.getPrices(symbols);
+    try {
+      const symbols = [...new Set(holdings.map((h) => normalizeSymbol(h.symbol)))];
+      const priceData = await yahooProvider.getPrices(symbols);
 
-    const snapshots = Array.from(priceData.entries()).map(([symbol, data]) => ({
-      id: `${symbol}-${new Date().toISOString().split('T')[0]}`,
-      symbol,
-      price: data.price,
-      previousClose: data.previousClose,
-      change: data.change,
-      changePercent: data.changePercent,
-      high52w: data.high52w,
-      low52w: data.low52w,
-      capturedAt: new Date().toISOString().split('T')[0],
-    }));
+      if (priceData.size === 0) return; // 网络失败/超时，保留现有价格
 
-    const { savePriceSnapshots } = await import('../data/storage');
-    await savePriceSnapshots(snapshots);
-    await loadData();
-  }, [holdings, loadData]);
+      const snapshots = Array.from(priceData.entries()).map(([symbol, data]) => ({
+        id: `${symbol}-${new Date().toISOString().split('T')[0]}`,
+        symbol,
+        price: data.price,
+        previousClose: data.previousClose,
+        change: data.change,
+        changePercent: data.changePercent,
+        high52w: data.high52w,
+        low52w: data.low52w,
+        capturedAt: new Date().toISOString().split('T')[0],
+      }));
+
+      const { savePriceSnapshots } = await import('../data/storage');
+      await savePriceSnapshots(snapshots);
+
+      // 直接更新 prices state，避免 loadData 触发整页 loading
+      const p = await getLatestPrices(holdings.map((h) => h.symbol));
+      setPrices(p);
+      const sum = calculatePortfolioSummary(holdings, p);
+      setSummary(sum);
+      setDetails(calculateHoldingDetails(holdings, p, sum.totalValue));
+    } catch (e) {
+      // 静默失败：网络异常/超时不阻塞 UI
+      console.warn('[refresh] failed:', e);
+    }
+  }, [holdings]);
 
   return {
     holdings,

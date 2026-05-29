@@ -7,6 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { usePortfolio } from '../src/hooks/use-portfolio';
 import { useHealthScore } from '../src/hooks/use-health-score';
@@ -15,6 +16,17 @@ import { formatCurrency, formatPercent } from '../src/utils/formatters';
 import { getRandomTip } from '../src/utils/tips';
 import { analyzePortfolio } from '../src/data/ai-service';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { color } from '../src/theme/tokens';
+
+const THINKING_PHRASES = [
+  '正在深度思考中…',
+  '调取持仓最新数据…',
+  '快马加鞭指挥 AI…',
+  '扫描全球市场动态…',
+  '计算最优策略中…',
+  '锁定关键风险点…',
+  '整理大佬级建议…',
+];
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -35,30 +47,53 @@ export default function HomeScreen() {
     sentiment: string;
   } | null>(null);
   const [aiLoading, setAiLoading] = React.useState(false);
+  const [thinkingIdx, setThinkingIdx] = React.useState(0);
+  const phraseOpacity = React.useRef(new Animated.Value(1)).current;
+
+  // 轮播文案：每 1.8s 切换 + 短暂淡入
+  React.useEffect(() => {
+    if (!aiLoading) return;
+    setThinkingIdx(0);
+    const timer = setInterval(() => {
+      Animated.sequence([
+        Animated.timing(phraseOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(phraseOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+      ]).start();
+      setThinkingIdx((i) => (i + 1) % THINKING_PHRASES.length);
+    }, 1800);
+    return () => clearInterval(timer);
+  }, [aiLoading, phraseOpacity]);
 
   const triggerAI = React.useCallback(async () => {
-    if (holdings.length === 0) return;
+    if (holdings.length === 0 || aiLoading) return;
+    setAiInsight(null); // 立即清空旧分析，让用户感知刷新生效
     setAiLoading(true);
     try {
       const result = await analyzePortfolio(holdings, prices, score);
       setAiInsight(result);
+    } catch (e) {
+      // 静默失败：保留 null，UI 显示「刷新」让用户重试
     } finally {
       setAiLoading(false);
     }
-  }, [holdings, prices, score]);
+  }, [holdings, prices, score, aiLoading]);
 
   React.useEffect(() => {
     if (holdings.length > 0 && !aiInsight) {
       triggerAI();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holdings.length]);
 
+  // 下拉刷新：只刷新行情，AI 解耦由用户主动触发
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    await refresh();
-    await triggerAI();
-    setRefreshing(false);
-  }, [refresh, triggerAI]);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   if (!summary) {
     return (
@@ -79,7 +114,7 @@ export default function HomeScreen() {
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00C851" />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={color.brand.primary} />}
     >
       {/* Fun Tip */}
       <View style={styles.tipBar}>
@@ -111,19 +146,34 @@ export default function HomeScreen() {
       <View style={styles.aiCard}>
         <View style={styles.aiHeader}>
           <Text style={styles.aiTitle}>AI 智能分析</Text>
-          {aiLoading && <ActivityIndicator size="small" color="#00C851" />}
+          <TouchableOpacity
+            style={[styles.aiRefreshBtn, aiLoading && styles.aiRefreshBtnDisabled]}
+            onPress={triggerAI}
+            disabled={aiLoading}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={[styles.aiRefreshText, aiLoading && styles.aiRefreshTextDisabled]}>
+              {aiLoading ? '分析中' : '刷新'}
+            </Text>
+          </TouchableOpacity>
         </View>
-        {aiInsight ? (
+        {aiLoading ? (
+          <View style={styles.aiThinking}>
+            <Animated.Text style={[styles.aiThinkingText, { opacity: phraseOpacity }]}>
+              {THINKING_PHRASES[thinkingIdx]}
+            </Animated.Text>
+            <ActivityIndicator size="small" color={color.brand.primary} style={{ marginTop: 10 }} />
+          </View>
+        ) : aiInsight ? (
           <>
             <Text style={styles.aiSummary}>{aiInsight.summary}</Text>
             {aiInsight.suggestions.map((s, i) => (
               <Text key={i} style={styles.aiSuggestion}>• {s}</Text>
             ))}
           </>
-        ) : aiLoading ? (
-          <Text style={styles.aiPlaceholder}>正在分析大佬的持仓...</Text>
         ) : (
-          <Text style={styles.aiPlaceholder}>下拉刷新获取AI分析</Text>
+          <Text style={styles.aiPlaceholder}>点击右上角「刷新」获取 AI 分析</Text>
         )}
       </View>
 
@@ -131,9 +181,6 @@ export default function HomeScreen() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>持仓明细</Text>
-          <TouchableOpacity onPress={() => router.push('/holdings')}>
-            <Text style={styles.sectionAction}>全部</Text>
-          </TouchableOpacity>
         </View>
         {details.slice(0, 5).map((d) => (
           <TouchableOpacity
@@ -212,6 +259,17 @@ const styles = StyleSheet.create({
   },
   aiHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   aiTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A2E' },
+  aiRefreshBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#00C85114',
+  },
+  aiRefreshBtnDisabled: { backgroundColor: '#E8E8EE' },
+  aiRefreshText: { fontSize: 12, fontWeight: '700', color: '#00C851' },
+  aiRefreshTextDisabled: { color: '#8E8EA0' },
+  aiThinking: { paddingVertical: 16, alignItems: 'center' },
+  aiThinkingText: { fontSize: 13, color: '#00A246', fontWeight: '600', letterSpacing: 0.2 },
   aiSummary: { fontSize: 13, color: '#333', lineHeight: 20, marginBottom: 8 },
   aiSuggestion: { fontSize: 12, color: '#555', lineHeight: 18, marginBottom: 3 },
   aiPlaceholder: { fontSize: 13, color: '#8E8EA0', fontStyle: 'italic' },
@@ -235,7 +293,6 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A2E' },
-  sectionAction: { fontSize: 13, fontWeight: '600', color: '#00C851' },
   stockRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

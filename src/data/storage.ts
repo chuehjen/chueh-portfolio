@@ -47,6 +47,14 @@ export async function initDatabase(): Promise<void> {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_price_symbol_date
       ON price_snapshots(symbol, captured_at);
+
+    CREATE TABLE IF NOT EXISTS holding_insights (
+      symbol TEXT PRIMARY KEY,
+      tag TEXT NOT NULL,
+      confidence INTEGER NOT NULL,
+      rationale TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Seed mock data if database is empty
@@ -209,4 +217,42 @@ function mapPriceRow(row: Record<string, unknown>): PriceSnapshot {
     low52w: (row.low_52w as number) || 0,
     capturedAt: row.captured_at as string,
   };
+}
+
+// Holding insights (AI strategy tags)
+
+export interface HoldingInsight {
+  symbol: string;
+  tag: string;
+  confidence: number;
+  rationale: string;
+  updatedAt: string;
+}
+
+export async function getHoldingInsights(symbols: string[]): Promise<Map<string, HoldingInsight>> {
+  if (symbols.length === 0) return new Map();
+  const placeholders = symbols.map(() => '?').join(',');
+  const rows = await (await ensureDb()).getAllAsync(
+    `SELECT symbol, tag, confidence, rationale, updated_at FROM holding_insights WHERE symbol IN (${placeholders})`,
+    symbols
+  ) as Record<string, unknown>[];
+  const result = new Map<string, HoldingInsight>();
+  for (const row of rows) {
+    result.set(row.symbol as string, {
+      symbol: row.symbol as string,
+      tag: row.tag as string,
+      confidence: row.confidence as number,
+      rationale: row.rationale as string,
+      updatedAt: row.updated_at as string,
+    });
+  }
+  return result;
+}
+
+export async function upsertHoldingInsight(insight: HoldingInsight): Promise<void> {
+  await (await ensureDb()).runAsync(
+    `INSERT OR REPLACE INTO holding_insights (symbol, tag, confidence, rationale, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [insight.symbol, insight.tag, insight.confidence, insight.rationale, insight.updatedAt]
+  );
 }
