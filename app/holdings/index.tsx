@@ -6,35 +6,21 @@ import {
   FlatList,
   RefreshControl,
   TouchableOpacity,
-  Alert,
-  TextInput,
-  Modal,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePortfolio } from '../../src/hooks/use-portfolio';
 import { useHealthScore } from '../../src/hooks/use-health-score';
 import { useHoldingInsights } from '../../src/hooks/use-holding-insights';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { deleteHolding, upsertHolding } from '../../src/data/storage';
+import { upsertHolding } from '../../src/data/storage';
 import { Holding } from '../../src/domain/types';
-import { getSector } from '../../src/data/sector-map';
 import { HoldingRow } from '../../src/components/portfolio/HoldingRow';
+import { HoldingFormModal } from '../../src/components/portfolio/HoldingFormModal';
 import { STRATEGY_DESCRIPTIONS } from '../../src/data/insight-service';
 import { SECTOR_DESCRIPTIONS } from '../../src/data/sector-map';
 import { color, spacing, radius, font, shadow, semantic } from '../../src/theme/tokens';
 
 type SortKey = 'value' | 'pnl' | 'name';
-
-interface FormData {
-  symbol: string;
-  name: string;
-  shares: string;
-  costBasisPerShare: string;
-  currency: string;
-}
-
-const EMPTY_FORM: FormData = { symbol: '', name: '', shares: '', costBasisPerShare: '', currency: 'USD' };
 
 export default function HoldingsScreen() {
   const router = useRouter();
@@ -44,8 +30,7 @@ export default function HoldingsScreen() {
   const [refreshing, setRefreshing] = React.useState(false);
   const [sortBy, setSortBy] = React.useState<SortKey>('value');
   const [showModal, setShowModal] = React.useState(false);
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [form, setForm] = React.useState<FormData>(EMPTY_FORM);
+  const [editingHolding, setEditingHolding] = React.useState<Holding | null>(null);
   const [showLegend, setShowLegend] = React.useState(false);
 
   useFocusEffect(
@@ -73,141 +58,27 @@ export default function HoldingsScreen() {
   }, [details, sortBy]);
 
   const openAdd = () => {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
+    setEditingHolding(null);
     setShowModal(true);
   };
 
-  const openEdit = (h: Holding) => {
-    setEditingId(h.id);
-    setForm({
-      symbol: h.symbol,
-      name: h.name,
-      shares: String(h.shares),
-      costBasisPerShare: String(h.costBasisPerShare),
-      currency: h.currency,
-    });
-    setShowModal(true);
-  };
-
-  const handleSave = async () => {
-    if (!form.symbol.trim() || !form.shares || !form.costBasisPerShare) {
-      Alert.alert('请填写', '代码、数量、成本价为必填项');
-      return;
-    }
-    const holding: Holding = {
-      id: editingId || `manual-${Date.now()}`,
-      symbol: form.symbol.trim().toUpperCase(),
-      name: form.name.trim() || form.symbol.trim().toUpperCase(),
-      shares: parseFloat(form.shares),
-      costBasisPerShare: parseFloat(form.costBasisPerShare),
-      currency: form.currency || 'USD',
-      sector: getSector(form.symbol.trim().toUpperCase()),
-      importedAt: new Date().toISOString().split('T')[0],
-    };
+  const handleSave = async (holding: Holding) => {
     await upsertHolding(holding);
-    setShowModal(false);
     await loadData();
   };
 
-  const handleDelete = (id: string, symbol: string) => {
-    Alert.alert('确认删除', `删除 ${symbol}?`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '删除',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteHolding(id);
-          await loadData();
-        },
-      },
-    ]);
-  };
-
-  const showActions = (h: Holding) => {
-    Alert.alert(h.symbol, '选择操作', [
-      { text: '编辑', onPress: () => openEdit(h) },
-      { text: '删除', style: 'destructive', onPress: () => handleDelete(h.id, h.symbol) },
-      { text: '取消', style: 'cancel' },
-    ]);
+  const goToDetail = (h: Holding) => {
+    router.push(`/holdings/${encodeURIComponent(h.symbol)}`);
   };
 
   function renderModal() {
     return (
-      <Modal visible={showModal} animationType="slide" transparent>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editingId ? '编辑持仓' : '添加持仓'}</Text>
-
-            <View style={styles.formRow}>
-              <Text style={styles.formLabel}>代码</Text>
-              <TextInput
-                style={styles.formInput}
-                value={form.symbol}
-                onChangeText={(v) => setForm({ ...form, symbol: v })}
-                placeholder="如 AAPL 或 00700.HK"
-                placeholderTextColor={color.text.tertiary}
-                autoCapitalize="characters"
-              />
-            </View>
-            <View style={styles.formRow}>
-              <Text style={styles.formLabel}>名称</Text>
-              <TextInput
-                style={styles.formInput}
-                value={form.name}
-                onChangeText={(v) => setForm({ ...form, name: v })}
-                placeholder="可选，如 Apple Inc"
-                placeholderTextColor={color.text.tertiary}
-              />
-            </View>
-            <View style={styles.formRow}>
-              <Text style={styles.formLabel}>数量</Text>
-              <TextInput
-                style={styles.formInput}
-                value={form.shares}
-                onChangeText={(v) => setForm({ ...form, shares: v })}
-                placeholder="持有股数"
-                placeholderTextColor={color.text.tertiary}
-                keyboardType="numeric"
-              />
-            </View>
-            <View style={styles.formRow}>
-              <Text style={styles.formLabel}>成本价</Text>
-              <TextInput
-                style={styles.formInput}
-                value={form.costBasisPerShare}
-                onChangeText={(v) => setForm({ ...form, costBasisPerShare: v })}
-                placeholder="每股成本"
-                placeholderTextColor={color.text.tertiary}
-                keyboardType="decimal-pad"
-              />
-            </View>
-            <View style={styles.formRow}>
-              <Text style={styles.formLabel}>币种</Text>
-              <View style={styles.currencyRow}>
-                {['USD', 'HKD', 'CNY'].map((c) => (
-                  <TouchableOpacity
-                    key={c}
-                    style={[styles.currencyBtn, form.currency === c && styles.currencyBtnActive]}
-                    onPress={() => setForm({ ...form, currency: c })}
-                  >
-                    <Text style={[styles.currencyBtnText, form.currency === c && styles.currencyBtnTextActive]}>{c}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowModal(false)}>
-                <Text style={styles.cancelBtnText}>取消</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-                <Text style={styles.saveBtnText}>保存</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      <HoldingFormModal
+        visible={showModal}
+        initial={editingHolding}
+        onClose={() => setShowModal(false)}
+        onSave={handleSave}
+      />
     );
   }
 
@@ -301,31 +172,41 @@ export default function HoldingsScreen() {
               </Text>
             </TouchableOpacity>
           ))}
-          <TouchableOpacity style={styles.addBtn} onPress={openAdd}>
-            <Text style={styles.addBtnText}>+ 添加</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </View>
   );
 
+  const renderTopBar = () => (
+    <View style={styles.topBar}>
+      <Text style={styles.topBarTitle}>持仓</Text>
+      <TouchableOpacity style={styles.topBarAdd} onPress={openAdd}>
+        <Text style={styles.topBarAddText}>+ 添加</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   if (holdings.length === 0) {
     return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>暂无持仓数据</Text>
-        <TouchableOpacity style={styles.importBtn} onPress={() => router.push('/import')}>
-          <Text style={styles.importBtnText}>导入持仓</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.outlineBtn} onPress={openAdd}>
-          <Text style={styles.outlineBtnText}>手动添加</Text>
-        </TouchableOpacity>
+      <SafeAreaView style={styles.container} edges={['top']}>
+        {renderTopBar()}
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>暂无持仓数据</Text>
+          <TouchableOpacity style={styles.importBtn} onPress={() => router.push('/import')}>
+            <Text style={styles.importBtnText}>导入持仓</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.outlineBtn} onPress={openAdd}>
+            <Text style={styles.outlineBtnText}>手动添加</Text>
+          </TouchableOpacity>
+        </View>
         {renderModal()}
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {renderTopBar()}
       <FlatList
         data={sortedDetails}
         keyExtractor={(item) => item.holding.id}
@@ -336,7 +217,7 @@ export default function HoldingsScreen() {
             <HoldingRow
               item={item}
               aiTag={ins ? { label: ins.tag, confidence: ins.confidence } : null}
-              onPress={(it) => showActions(it.holding)}
+              onPress={(it) => goToDetail(it.holding)}
             />
           );
         }}
@@ -346,13 +227,35 @@ export default function HoldingsScreen() {
         }
       />
       {renderModal()}
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: color.bg.app },
   listContent: { paddingBottom: spacing.xxxl },
+
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xl,
+    height: 44,
+    backgroundColor: color.bg.app,
+  },
+  topBarTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: color.text.primary,
+    letterSpacing: -0.3,
+  },
+  topBarAdd: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    backgroundColor: color.brand.primary,
+    borderRadius: radius.sm + 2,
+  },
+  topBarAddText: { ...font.tag, color: color.text.onPrimary },
 
   emptyContainer: { flex: 1, backgroundColor: color.bg.app, justifyContent: 'center', alignItems: 'center' },
   emptyText: { ...font.body, color: color.text.secondary },
@@ -506,6 +409,16 @@ const styles = StyleSheet.create({
   currencyBtnActive: { backgroundColor: color.brand.primary },
   currencyBtnText: { ...font.caption, color: color.text.secondary },
   currencyBtnTextActive: { color: color.text.onPrimary },
+  sectorWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  sectorChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.sm + 2,
+    backgroundColor: color.bg.subtle,
+  },
+  sectorChipActive: { backgroundColor: color.brand.primary },
+  sectorChipText: { fontSize: 12, fontWeight: '600', color: color.text.secondary },
+  sectorChipTextActive: { color: color.text.onPrimary },
   modalActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.xl },
   cancelBtn: {
     flex: 1,

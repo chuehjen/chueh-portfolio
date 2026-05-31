@@ -1,6 +1,5 @@
 // HoldingRow — 持仓行组件 V2
-// 设计规范：DESIGN_SYSTEM.md §6.2
-// 布局：左 [symbol+name+AI标签+行业] | 中 [市值] | 右 [损益金额+收益率药丸]
+// 布局：左 [symbol+name+AI标签+行业] | 中 [现价+市值] | 右 [损益金额+收益率药丸]
 
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
@@ -16,14 +15,17 @@ interface Props {
 }
 
 export function HoldingRow({ item, aiTag, onPress }: Props) {
-  const { holding, value, pnl, pnlPercent } = item;
+  const { holding, currentPrice, value, pnl, pnlPercent } = item;
   const pnlColor = semantic.pnlColor(pnl);
   const pillBg = semantic.pnlPillBg(pnl);
   const sectorZH = getSectorZH(holding.symbol);
 
+  // 日涨跌色（基于 dayChange）
+  const dayColor = semantic.pnlColor(item.dayChange);
+
   return (
     <TouchableOpacity style={styles.row} activeOpacity={0.6} onPress={() => onPress(item)}>
-      {/* Left */}
+      {/* Left: 代码+名称+标签 */}
       <View style={styles.left}>
         <Text style={styles.symbol} numberOfLines={1}>{holding.symbol}</Text>
         <Text style={styles.name} numberOfLines={1}>{holding.name}</Text>
@@ -43,18 +45,20 @@ export function HoldingRow({ item, aiTag, onPress }: Props) {
         )}
       </View>
 
-      {/* Center: 市值 */}
+      {/* Center: 现价 + 市值 */}
       <View style={styles.center}>
-        <Text style={styles.valueText} numberOfLines={1}>
-          {formatCurrency(value, holding.currency)}
+        <Text style={[styles.priceText, { color: dayColor }]} numberOfLines={1}>
+          {formatCurrency(currentPrice, holding.currency)}
         </Text>
-        <Text style={styles.valueLabel}>市值</Text>
+        <Text style={styles.valueLabel} numberOfLines={1}>
+          市值 {formatCurrency(value, holding.currency)}
+        </Text>
       </View>
 
       {/* Right: 总损益 + 收益率药丸 */}
       <View style={styles.right}>
         <Text style={[styles.pnlAmount, { color: pnlColor }]} numberOfLines={1}>
-          {pnl >= 0 ? '+' : ''}{formatCurrency(pnl, holding.currency)}
+          {pnl >= 0 ? '+' : ''}{formatCurrency(pnl, holding.currency, { noDecimals: true })}
         </Text>
         <View style={[styles.pill, { backgroundColor: pillBg }]}>
           <Text style={[styles.pillText, { color: pnlColor }]}>
@@ -78,7 +82,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     ...shadow.card,
   },
-  left: { flex: 1.2, paddingRight: spacing.sm },
+  left: { flex: 1.1, paddingRight: spacing.sm },
   symbol: { ...font.body, color: color.text.primary, ...semantic.numberStyle },
   name: { ...font.tiny, color: color.text.secondary, marginTop: 2 },
   tagRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
@@ -88,10 +92,10 @@ const styles = StyleSheet.create({
   sectorText: { ...font.tiny, color: color.text.tertiary, fontWeight: '500' },
 
   center: { flex: 1, alignItems: 'flex-end', paddingRight: spacing.md },
-  valueText: { ...font.body, color: color.text.primary, ...semantic.numberStyle },
-  valueLabel: { ...font.tiny, color: color.text.tertiary, marginTop: 2 },
+  priceText: { ...font.body, fontWeight: '700', ...semantic.numberStyle },
+  valueLabel: { ...font.tiny, color: color.text.tertiary, marginTop: 3 },
 
-  right: { flex: 1, alignItems: 'flex-end' },
+  right: { flex: 0.9, alignItems: 'flex-end' },
   pnlAmount: { ...font.body, fontWeight: '700', ...semantic.numberStyle },
   pill: {
     marginTop: 4,

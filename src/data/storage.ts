@@ -55,6 +55,15 @@ export async function initDatabase(): Promise<void> {
       rationale TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS portfolio_insights (
+      id TEXT PRIMARY KEY,
+      summary TEXT NOT NULL,
+      suggestions TEXT NOT NULL,
+      sentiment TEXT NOT NULL DEFAULT 'neutral',
+      holdings_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Seed mock data if database is empty
@@ -126,6 +135,7 @@ export async function clearAllHoldings(): Promise<void> {
   await db.runAsync('DELETE FROM holdings');
   await db.runAsync('DELETE FROM price_snapshots');
   await db.runAsync('DELETE FROM daily_portfolio_snapshots');
+  await db.runAsync('DELETE FROM portfolio_insights');
 }
 
 // Price snapshots
@@ -255,4 +265,58 @@ export async function upsertHoldingInsight(insight: HoldingInsight): Promise<voi
      VALUES (?, ?, ?, ?, ?)`,
     [insight.symbol, insight.tag, insight.confidence, insight.rationale, insight.updatedAt]
   );
+}
+
+// Portfolio insights (full-portfolio AI analysis, single-row cache)
+
+export interface PortfolioInsight {
+  summary: string;
+  suggestions: string[];
+  sentiment: string;
+  holdingsHash: string;
+  createdAt: string;
+}
+
+export async function getPortfolioInsight(): Promise<PortfolioInsight | null> {
+  const row = await (await ensureDb()).getFirstAsync(
+    `SELECT summary, suggestions, sentiment, holdings_hash, created_at
+     FROM portfolio_insights WHERE id = 'latest'`
+  ) as Record<string, unknown> | null;
+  if (!row) return null;
+  let suggestions: string[] = [];
+  try {
+    suggestions = JSON.parse(row.suggestions as string);
+  } catch {
+    suggestions = [];
+  }
+  return {
+    summary: row.summary as string,
+    suggestions,
+    sentiment: row.sentiment as string,
+    holdingsHash: row.holdings_hash as string,
+    createdAt: row.created_at as string,
+  };
+}
+
+export async function savePortfolioInsight(insight: PortfolioInsight): Promise<void> {
+  await (await ensureDb()).runAsync(
+    `INSERT OR REPLACE INTO portfolio_insights (id, summary, suggestions, sentiment, holdings_hash, created_at)
+     VALUES ('latest', ?, ?, ?, ?, ?)`,
+    [insight.summary, JSON.stringify(insight.suggestions), insight.sentiment, insight.holdingsHash, insight.createdAt]
+  );
+}
+
+// 持仓集合的稳定哈希：用于判断持仓结构是否变化（触发 AI 过期提醒）
+export function hashHoldings(holdings: Holding[]): string {
+  const sig = holdings
+    .map((h) => `${h.id}|${h.symbol}|${h.shares}|${h.costBasisPerShare}`)
+    .sort()
+    .join(';');
+  // 简易 djb2 哈希，无需引入 crypto
+  let hash = 5381;
+  for (let i = 0; i < sig.length; i++) {
+    hash = ((hash << 5) + hash) + sig.charCodeAt(i);
+    hash = hash & 0xffffffff;
+  }
+  return Math.abs(hash).toString(36) + '-' + holdings.length;
 }

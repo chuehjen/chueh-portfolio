@@ -47,6 +47,7 @@ export default function RootLayout() {
         name="holdings"
         options={{
           title: '持仓',
+          headerShown: false,
         }}
       />
       <Tabs.Screen

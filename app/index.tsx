@@ -15,8 +15,14 @@ import { EmptyState } from '../src/components/ui/EmptyState';
 import { formatCurrency, formatPercent } from '../src/utils/formatters';
 import { getRandomTip } from '../src/utils/tips';
 import { analyzePortfolio } from '../src/data/ai-service';
+import {
+  getPortfolioInsight,
+  savePortfolioInsight,
+  hashHoldings,
+  PortfolioInsight,
+} from '../src/data/storage';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { color } from '../src/theme/tokens';
+import { color, semantic } from '../src/theme/tokens';
 
 const THINKING_PHRASES = [
   '正在深度思考中…',
@@ -27,6 +33,22 @@ const THINKING_PHRASES = [
   '锁定关键风险点…',
   '整理大佬级建议…',
 ];
+
+// 相对时间："刚刚 / N 分钟前 / N 小时前 / 昨天 / N 天前"
+function formatRelative(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diffMs / 60000);
+  if (m < 1) return '刚刚生成';
+  if (m < 60) return `${m} 分钟前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时前`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return '昨天';
+  if (d < 7) return `${d} 天前`;
+  return new Date(iso).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+}
+
+const STALE_MS = 24 * 60 * 60 * 1000; // 超过 24h 视为「分析较旧」
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -41,14 +63,13 @@ export default function HomeScreen() {
       loadData();
     }, [loadData])
   );
-  const [aiInsight, setAiInsight] = React.useState<{
-    summary: string;
-    suggestions: string[];
-    sentiment: string;
-  } | null>(null);
+  const [aiInsight, setAiInsight] = React.useState<PortfolioInsight | null>(null);
   const [aiLoading, setAiLoading] = React.useState(false);
   const [thinkingIdx, setThinkingIdx] = React.useState(0);
   const phraseOpacity = React.useRef(new Animated.Value(1)).current;
+
+  // 当前持仓哈希（用于判定 AI 是否过期）
+  const currentHash = React.useMemo(() => hashHoldings(holdings), [holdings]);
 
   // 轮播文案：每 1.8s 切换 + 短暂淡入
   React.useEffect(() => {
@@ -64,24 +85,43 @@ export default function HomeScreen() {
     return () => clearInterval(timer);
   }, [aiLoading, phraseOpacity]);
 
+  // AI 分析：仅跑 AI，不再内嵌 refresh；用当前 prices；完成后写 SQLite
   const triggerAI = React.useCallback(async () => {
     if (holdings.length === 0 || aiLoading) return;
-    setAiInsight(null); // 立即清空旧分析，让用户感知刷新生效
     setAiLoading(true);
     try {
       const result = await analyzePortfolio(holdings, prices, score);
-      setAiInsight(result);
+      const insight: PortfolioInsight = {
+        summary: result.summary,
+        suggestions: result.suggestions,
+        sentiment: result.sentiment,
+        holdingsHash: hashHoldings(holdings),
+        createdAt: new Date().toISOString(),
+      };
+      setAiInsight(insight);
+      await savePortfolioInsight(insight);
     } catch (e) {
-      // 静默失败：保留 null，UI 显示「刷新」让用户重试
+      // 静默失败：保留旧分析，UI 显示「刷新」让用户重试
     } finally {
       setAiLoading(false);
     }
   }, [holdings, prices, score, aiLoading]);
 
+  // 启动：从 SQLite 读取上次 AI 缓存。如果完全没有缓存且首次有持仓，自动跑一次
+  const aiBootRef = React.useRef(false);
   React.useEffect(() => {
-    if (holdings.length > 0 && !aiInsight) {
-      triggerAI();
-    }
+    if (aiBootRef.current) return;
+    if (holdings.length === 0) return;
+    aiBootRef.current = true;
+    (async () => {
+      const cached = await getPortfolioInsight();
+      if (cached) {
+        setAiInsight(cached);
+      } else {
+        // 首次使用：自动生成一次 AI 让用户立刻看到价值
+        triggerAI();
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holdings.length]);
 
@@ -167,6 +207,23 @@ export default function HomeScreen() {
           </View>
         ) : aiInsight ? (
           <>
+            {(() => {
+              const holdingsChanged = aiInsight.holdingsHash !== currentHash;
+              const tooOld = Date.now() - new Date(aiInsight.createdAt).getTime() > STALE_MS;
+              const stale = holdingsChanged || tooOld;
+              return (
+                <View style={styles.aiMetaRow}>
+                  <Text style={styles.aiMetaTime}>{formatRelative(aiInsight.createdAt)}</Text>
+                  {stale && (
+                    <View style={styles.aiStaleBadge}>
+                      <Text style={styles.aiStaleText}>
+                        {holdingsChanged ? '持仓有变化，建议重新分析' : '分析较旧，建议刷新'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })()}
             <Text style={styles.aiSummary}>{aiInsight.summary}</Text>
             {aiInsight.suggestions.map((s, i) => (
               <Text key={i} style={styles.aiSuggestion}>• {s}</Text>
@@ -193,8 +250,12 @@ export default function HomeScreen() {
               <Text style={styles.stockSymbol}>{d.holding.symbol}</Text>
               <Text style={styles.stockName} numberOfLines={1}>{d.holding.name}</Text>
             </View>
+            <View style={styles.stockCenter}>
+              <Text style={[styles.stockPrice, { color: semantic.pnlColor(d.dayChange) }]}>
+                {formatCurrency(d.currentPrice, d.holding.currency)}
+              </Text>
+            </View>
             <View style={styles.stockRight}>
-              <Text style={styles.stockValue}>{formatCurrency(d.value, d.holding.currency)}</Text>
               <View style={[styles.changePill, d.pnl >= 0 ? styles.pillProfit : styles.pillLoss]}>
                 <Text style={[styles.changePillText, d.pnl >= 0 ? styles.profit : styles.loss]}>
                   {d.pnl >= 0 ? '+' : ''}{d.pnlPercent.toFixed(1)}%
@@ -273,6 +334,17 @@ const styles = StyleSheet.create({
   aiSummary: { fontSize: 13, color: '#333', lineHeight: 20, marginBottom: 8 },
   aiSuggestion: { fontSize: 12, color: '#555', lineHeight: 18, marginBottom: 3 },
   aiPlaceholder: { fontSize: 13, color: '#8E8EA0', fontStyle: 'italic' },
+  aiMetaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' },
+  aiMetaTime: { fontSize: 11, color: '#8E8EA0', marginRight: 8 },
+  aiStaleBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: '#FFF7E6',
+    borderRadius: 6,
+    borderWidth: 0.5,
+    borderColor: '#FFE0A3',
+  },
+  aiStaleText: { fontSize: 11, color: '#B8741A', fontWeight: '600' },
   section: {
     marginHorizontal: 16,
     backgroundColor: '#FFFFFF',
@@ -302,11 +374,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: '#F5F5FA',
   },
-  stockLeft: { flex: 1 },
+  stockLeft: { flex: 1.2 },
   stockSymbol: { fontSize: 15, fontWeight: '700', color: '#1A1A2E' },
   stockName: { fontSize: 12, color: '#8E8EA0', marginTop: 2, maxWidth: 140 },
-  stockRight: { alignItems: 'flex-end', gap: 4 },
-  stockValue: { fontSize: 15, fontWeight: '600', color: '#1A1A2E' },
+  stockCenter: { flex: 1, alignItems: 'flex-end', paddingRight: 12 },
+  stockPrice: { fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] as any },
+  stockRight: { alignItems: 'flex-end' },
+  stockPnl: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] as any },
   changePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   pillProfit: { backgroundColor: '#00C85112' },
   pillLoss: { backgroundColor: '#FF525212' },

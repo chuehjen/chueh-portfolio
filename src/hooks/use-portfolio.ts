@@ -46,12 +46,12 @@ export function usePortfolio() {
   }, [loadData]);
 
   const refresh = useCallback(async () => {
-    if (holdings.length === 0) return;
+    if (holdings.length === 0) return null;
     try {
       const symbols = [...new Set(holdings.map((h) => normalizeSymbol(h.symbol)))];
       const priceData = await yahooProvider.getPrices(symbols);
 
-      if (priceData.size === 0) return; // 网络失败/超时，保留现有价格
+      if (priceData.size === 0) return null; // 网络失败/超时，保留现有价格
 
       const snapshots = Array.from(priceData.entries()).map(([symbol, data]) => ({
         id: `${symbol}-${new Date().toISOString().split('T')[0]}`,
@@ -74,9 +74,11 @@ export function usePortfolio() {
       const sum = calculatePortfolioSummary(holdings, p);
       setSummary(sum);
       setDetails(calculateHoldingDetails(holdings, p, sum.totalValue));
+      return p;
     } catch (e) {
       // 静默失败：网络异常/超时不阻塞 UI
       console.warn('[refresh] failed:', e);
+      return null;
     }
   }, [holdings]);
 

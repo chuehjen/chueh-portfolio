@@ -1,11 +1,16 @@
 import { CURRENCY_SYMBOLS } from './constants';
 
-export function formatCurrency(value: number, currency: string = 'USD'): string {
+export function formatCurrency(
+  value: number,
+  currency: string = 'USD',
+  options: { noDecimals?: boolean } = {}
+): string {
   const symbol = CURRENCY_SYMBOLS[currency] || currency;
   const abs = Math.abs(value);
+  const digits = options.noDecimals ? 0 : 2;
   const formatted = abs.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   });
   return value < 0 ? `-${symbol}${formatted}` : `${symbol}${formatted}`;
 }

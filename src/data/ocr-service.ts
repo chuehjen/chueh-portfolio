@@ -1,5 +1,5 @@
 import { Holding } from '../domain/types';
-import { getSector } from './sector-map';
+import { getSector, normalizeSector } from './sector-map';
 
 const BAILIAN_API_KEY = process.env.EXPO_PUBLIC_BAILIAN_API_KEY ?? '';
 const BAILIAN_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
@@ -10,6 +10,7 @@ export interface RecognizedHolding {
   shares: number;
   costBasisPerShare: number;
   currency: string;
+  sector?: string; // AI 推断的行业；归一化后写入 holding.sector
 }
 
 export interface RecognitionResult {
@@ -25,11 +26,17 @@ export async function recognizeHoldingsFromImage(base64Image: string): Promise<R
 1. 如果是富途牛牛（Futu/moomoo）截图：提取股票代码（含.HK/.US后缀）、名称、持有数量、成本价/买入均价
 2. 如果是FirstTrade截图：提取Symbol、Description、Quantity、Cost Basis (per share)
 3. 货币：港股用HKD，美股用USD，A股用CNY
+4. 行业(sector)：根据公司名称和代码判断，从以下选项中选一个：
+   "Technology"(科技/半导体/软件)、"Communication Services"(互联网/媒体/电信)、
+   "Consumer Discretionary"(可选消费/汽车/电商)、"Consumer Staples"(必需消费/食品)、
+   "Financials"(金融/银行/支付/保险)、"Healthcare"(医疗/医药)、
+   "Energy"(能源)、"Industrials"(工业)、"Materials"(材料)、"Utilities"(公用事业)、
+   "Real Estate"(地产)、"ETF"(指数基金/ETF)。如果实在判断不出，写"Unknown"
 
 请返回严格JSON格式：
 {
   "holdings": [
-    {"symbol": "AAPL", "name": "Apple Inc", "shares": 100, "costBasisPerShare": 150.5, "currency": "USD"}
+    {"symbol": "AAPL", "name": "Apple Inc", "shares": 100, "costBasisPerShare": 150.5, "currency": "USD", "sector": "Technology"}
   ],
   "source": "futu" 或 "firstrade" 或 "unknown",
   "confidence": "high" 或 "medium" 或 "low"
@@ -37,6 +44,7 @@ export async function recognizeHoldingsFromImage(base64Image: string): Promise<R
 
 注意：
 - symbol标准化：港股用5位数字+.HK（如00700.HK），美股直接用代码
+- sector必须是上面列表中的英文名之一，不要翻译成中文
 - 如果截图模糊或无法识别，返回空holdings数组
 - 只返回JSON，不要其他文字`;
 
@@ -87,14 +95,20 @@ export async function recognizeHoldingsFromImage(base64Image: string): Promise<R
 }
 
 export function convertToHoldings(recognized: RecognizedHolding[]): Holding[] {
-  return recognized.map((r, index) => ({
-    id: `import-${Date.now()}-${index}`,
-    symbol: r.symbol,
-    name: r.name,
-    shares: r.shares,
-    costBasisPerShare: r.costBasisPerShare,
-    currency: r.currency,
-    sector: getSector(r.symbol),
-    importedAt: new Date().toISOString().split('T')[0],
-  }));
+  return recognized.map((r, index) => {
+    // sector 三层兜底：白名单 → AI 推断 → Unknown
+    const fromMap = getSector(r.symbol);
+    const fromAI = normalizeSector(r.sector);
+    const sector = fromMap !== 'Unknown' ? fromMap : (fromAI !== 'Unknown' ? fromAI : 'Unknown');
+    return {
+      id: `import-${Date.now()}-${index}`,
+      symbol: r.symbol,
+      name: r.name,
+      shares: r.shares,
+      costBasisPerShare: r.costBasisPerShare,
+      currency: r.currency,
+      sector,
+      importedAt: new Date().toISOString().split('T')[0],
+    };
+  });
 }

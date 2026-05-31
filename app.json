@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "chueh-portfolio",
-    "slug": "chueh-portfolio",
+    "name": "Gainly",
+    "slug": "gainly",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "scheme": "chueh-portfolio",
+    "scheme": "gainly",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.chueh-portfolio"
+      "bundleIdentifier": "com.chuehjen.gainly"
     },
     "android": {
       "adaptiveIcon": {
@@ -37,7 +37,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "chueh-portfolio"
+        "projectId": "gainly"
       }
     }
   }
